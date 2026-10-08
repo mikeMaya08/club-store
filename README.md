@@ -24,10 +24,10 @@ Local development (repos cloned side by side):
 "club-store": "file:../club-store"
 ```
 
-Deployment (Netlify installs from git; `prepare` builds it):
+Deployment (Vercel installs from git over https; `prepare` builds it. Use `git+https`, because the `github:` shorthand makes npm try SSH, which CI machines don't have):
 
 ```json
-"club-store": "github:<org>/club-store#v0.1.0"
+"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.1.0"
 ```
 
 Apps must add `resolve.dedupe: ['react', 'react-dom']` in `vite.config.ts` so the linked package
