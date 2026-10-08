@@ -27,7 +27,7 @@ Local development (repos cloned side by side):
 Deployment (Vercel installs from git over https; `prepare` builds it. Use `git+https`, because the `github:` shorthand makes npm try SSH, which CI machines don't have):
 
 ```json
-"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.1.0"
+"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.2.0"
 ```
 
 Apps must add `resolve.dedupe: ['react', 'react-dom']` in `vite.config.ts` so the linked package
@@ -58,7 +58,7 @@ import { actions, api, useClub, useSession, initClub, slotStatus, priceFor, Rule
 | Overlaps reservation, block or lesson              | `SLOT_TAKEN`        |
 | Cancelling inside `cancelHoursLimit`               | `CANCEL_TOO_LATE`   |
 | Inactive court / user                              | `COURT_INACTIVE`, `USER_INACTIVE` |
-| Lesson full / already enrolled                     | `LESSON_FULL`, `ALREADY_ENROLLED` |
+| Lesson full / already enrolled / already waitlisted | `LESSON_FULL`, `ALREADY_ENROLLED`, `ALREADY_WAITLISTED` |
 | Deleting a court with future reservations/lessons  | `COURT_IN_USE`      |
 | Other                                              | `NOT_FOUND`, `INVALID_STATE`, `VALIDATION`, `NETWORK_ERROR` |
 
@@ -66,9 +66,18 @@ Extra behaviour: blocks cancel overlapping reservations and notify players; less
 deactivating a user cancels their future reservations; a lesson no-show also marks an overlapping
 booked reservation as `no-show`.
 
+### Added in v0.2.0
+
+- **Lesson waitlist:** `joinWaitlist` (only for full lessons) / `leaveWaitlist`. When a seat frees up (`leaveLesson`, capacity increase) the first active waiting player is enrolled automatically and notified (`waitlist-promoted`).
+- **Weekly recurring bookings:** `bookRecurring({ ..., weeks: 2-8 })` is all-or-nothing, error messages name the failing week. A whole series (`seriesId`) counts as **one** active reservation for `maxActiveReservations`. `cancelSeries` cancels every occurrence still outside the cancellation window.
+- **`moveReservation(id, { courtId?, date?, start? }, adminId)`:** admin-only, re-checks every booking rule, recalculates end and price, notifies the player.
+- **`updateLesson(id, patch, actorId)`:** admin or the lesson's coach; moves the lesson's court block together with it.
+- **Lesson templates:** `saveTemplate` / `deleteTemplate` (coach-owned, stored in the state).
+- Data saved by v0.1 is upgraded on read (`waitlist`, `lessonTemplates`).
+
 ### Seeds
 
-- `demo`: 6 courts (2 without lights, 1 inactive), 1 admin, 2 coaches, 12 players, 40 reservations in ±7 days, 4 lessons (`lesson-3` is full), notes, notifications. Dates are relative to the club clock, so use `?now=` for fully fixed data.
+- `demo`: 6 courts (2 without lights, 1 inactive), 1 admin, 2 coaches, 12 players, 40 reservations in ±7 days, 4 lessons (`lesson-3` is full and has `player-10` on its waitlist), 2 lesson templates for `coach-1`, notes, notifications. Dates are relative to the club clock, so use `?now=` for fully fixed data.
 - `empty`: users and courts only.
 - `full`: ~90% of the next 3 days booked by `player-7..12`; `player-1..6` are free to book.
 

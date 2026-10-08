@@ -38,6 +38,13 @@ function write(state: State) {
   lastState = state
 }
 
+/** Fills fields added after v0.1 so data saved by older versions keeps working. */
+function normalize(data: State): State {
+  data.lessonTemplates ??= []
+  for (const lesson of data.lessons) lesson.waitlist ??= []
+  return data
+}
+
 /** Always reads the latest persisted state (seeding it on first use). */
 function readFresh(): State {
   const raw = localStore().getItem(STORAGE_KEY)
@@ -47,7 +54,7 @@ function readFresh(): State {
       const parsed = JSON.parse(raw)
       if (parsed.version === VERSION) {
         lastRaw = raw
-        lastState = parsed.data as State
+        lastState = normalize(parsed.data)
         return lastState
       }
     } catch {
