@@ -13,7 +13,7 @@ Used by `club-player`, `club-admin` and `club-coach`. It is the only link betwee
 | `npm install`       | Installs and builds `dist/` (via `prepare`)          |
 | `npm run build`     | `tsup` → `dist/index.js` (ESM) + `dist/index.d.ts`   |
 | `npm run dev`       | `tsup --watch` (apps pick up changes automatically)  |
-| `npm test`          | Vitest: every rule and every `RuleError` code        |
+| `npm test`          | Vitest: every rule and every `RuleError` code (109 tests)        |
 | `npm run typecheck` | `tsc --noEmit`                                       |
 
 ## Using it from an app
