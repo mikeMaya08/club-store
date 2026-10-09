@@ -13,7 +13,7 @@ Used by `club-player`, `club-admin` and `club-coach`. It is the only link betwee
 | `npm install`       | Installs and builds `dist/` (via `prepare`)          |
 | `npm run build`     | `tsup` → `dist/index.js` (ESM) + `dist/index.d.ts`   |
 | `npm run dev`       | `tsup --watch` (apps pick up changes automatically)  |
-| `npm test`          | Vitest: every rule and every `RuleError` code (109 tests)        |
+| `npm test`          | Vitest: every rule and every `RuleError` code (128 tests)        |
 | `npm run typecheck` | `tsc --noEmit`                                       |
 
 ## Using it from an app
@@ -27,7 +27,7 @@ Local development (repos cloned side by side):
 Deployment (Vercel installs from git over https; `prepare` builds it. Use `git+https`, because the `github:` shorthand makes npm try SSH, which CI machines don't have):
 
 ```json
-"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.2.0"
+"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.3.0"
 ```
 
 Apps must add `resolve.dedupe: ['react', 'react-dom']` in `vite.config.ts` so the linked package
@@ -75,6 +75,22 @@ booked reservation as `no-show`.
 - **Lesson templates:** `saveTemplate` / `deleteTemplate` (coach-owned, stored in the state).
 - Data saved by v0.1 is upgraded on read (`waitlist`, `lessonTemplates`).
 
+### Added in v0.3.0: activity log
+
+Every action writes an event to `state.events` **inside the same `commit`**, so an event exists if and only if the action happened (a failed action logs nothing). The log keeps the latest 500 events.
+
+```ts
+{ id: 'evt-12', type: 'reservation.cancelled', actorId: 'admin-1', subjectId: 'player-3',
+  entity: 'reservation', entityId: 'res-7', summary: '...', meta: { reason: 'blocked by club' }, createdAt: '...' }
+```
+
+- **Types** (`EVENT_TYPES`): `reservation.*` (booked, series_booked, cancelled, series_cancelled, moved, no_show), `block.*`, `lesson.*` (created, updated, cancelled, completed, enrolled, left, waitlist_joined/left/promoted), `attendance.marked`, `note.added`, `template.*`, `user.*` (activated, deactivated, role_changed), `court.*`, `settings.updated`.
+- **Cascades are logged too:** a block logs `block.created` plus one `reservation.cancelled` per cancelled reservation (actor = the admin); deactivating a user logs the change and each cancelled reservation; a lesson no-show logs the attendance and the reservation it flips.
+- **Actor:** most actions already take the actor. `moveBlock`, `deleteBlock`, `completeLesson`, `setAttendance`, `setUserActive`, `setUserRole`, `createCourt`, `updateCourt`, `deleteCourt` and `updateSettings` got an **optional trailing `actorId`**; without it the actor is `'system'` (waitlist promotions are always `'system'`).
+- `filterEvents(events, { types, actorId, involvingUserId, entity, from, to })` returns newest first. `window.__club.state.events` is available to tests.
+- **Bug `?bug=missing-events`:** cancellation events (`*cancelled`) are not logged.
+- The demo seed ships with a history that matches its reservations, lessons and notes. Data saved before v0.3 is upgraded on read.
+
 ### Seeds
 
 - `demo`: 6 courts (2 without lights, 1 inactive), 1 admin, 2 coaches, 12 players, 40 reservations in ±7 days, 4 lessons (`lesson-3` is full and has `player-10` on its waitlist), 2 lesson templates for `coach-1`, notes, notifications. Dates are relative to the club clock, so use `?now=` for fully fixed data.
@@ -94,7 +110,7 @@ Read from the URL, kept in `sessionStorage`, then stripped from the address bar:
 | `?now=2026-10-10T18:30`  | Freeze the club clock                            |
 | `?latency=800`           | Delay every `api.*` call (ms)                    |
 | `?flaky=0.2`             | 20% of commits throw `NETWORK_ERROR`             |
-| `?bug=a,b`               | `double-booking`, `stale-ui`, `wrong-price`, `cancel-anytime`, `slow-render` |
+| `?bug=a,b`               | `double-booking`, `stale-ui`, `wrong-price`, `cancel-anytime`, `slow-render`, `missing-events` |
 
 `window.__club` exposes `{ state, reset(seed), setBugs([]), setNow(iso) }` (plus `setLatency`, `setFlaky`, `config`).
 
