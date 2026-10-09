@@ -1,6 +1,6 @@
 import { sessionStore } from './storage'
 
-export const BUGS = ['double-booking', 'stale-ui', 'wrong-price', 'cancel-anytime', 'slow-render'] as const
+export const BUGS = ['double-booking', 'stale-ui', 'wrong-price', 'cancel-anytime', 'slow-render', 'missing-events'] as const
 export type Bug = (typeof BUGS)[number]
 
 /** Test knobs, persisted in sessionStorage so they survive reloads within a tab. */

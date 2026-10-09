@@ -1,6 +1,6 @@
 {
   "name": "club-store",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Shared data layer, business rules, seeds and sync for the Baseline Tennis Club sandbox",
   "type": "module",
   "main": "./dist/index.js",

@@ -2,7 +2,7 @@ import { addDays, format, parseISO } from 'date-fns'
 import { clock } from './clock'
 import { priceFor } from './pricing'
 import { at, slotsFor } from './time'
-import type { Court, Lesson, Reservation, Settings, SeedName, State, User } from './types'
+import type { ClubEvent, Court, Lesson, Reservation, Settings, SeedName, State, User } from './types'
 
 /** Small deterministic PRNG so seeds are identical on every run. */
 function mulberry32(seed: number) {
@@ -74,6 +74,7 @@ const emptyState = (): State => ({
   blocks: [],
   lessons: [],
   lessonTemplates: [],
+  events: [],
   notes: [],
   notifications: [],
   settings: { ...DEFAULT_SETTINGS },
@@ -183,6 +184,60 @@ function fillDemo(s: State) {
   notif('admin-1', 'info', 'Weekly report is ready.', false, 0)
   notif('coach-1', 'info', 'Advanced Rallies is now full.', false, 0)
   notif('coach-2', 'info', 'Serve Clinic has 3 seats left.', true, 0)
+
+  seedEvents(s, now)
+}
+
+/** Gives the demo an activity history that matches its reservations, lessons and notes. */
+function seedEvents(s: State, now: Date) {
+  const name = (id: string) => s.users.find((u) => u.id === id)?.name ?? id
+  const court = (id: string) => s.courts.find((c) => c.id === id)?.name ?? id
+  const events: Omit<ClubEvent, 'id'>[] = []
+  for (const r of s.reservations) {
+    const where = `${court(r.courtId)} on ${r.date} at ${r.start}`
+    events.push({
+      type: 'reservation.booked', actorId: r.playerId, subjectId: r.partnerId, entity: 'reservation', entityId: r.id,
+      summary: `${name(r.playerId)} booked ${where}${r.partnerId ? ` with ${name(r.partnerId)}` : ''}`,
+      meta: { courtId: r.courtId, date: r.date, start: r.start, price: r.price }, createdAt: r.createdAt,
+    })
+    if (r.status === 'cancelled') {
+      events.push({
+        type: 'reservation.cancelled', actorId: r.playerId, subjectId: r.playerId, entity: 'reservation', entityId: r.id,
+        summary: `${name(r.playerId)} cancelled the reservation of ${name(r.playerId)} on ${where}`,
+        meta: { reason: r.cancelReason ?? '' }, createdAt: iso(r.date, r.start, -1),
+      })
+    }
+    if (r.status === 'no-show') {
+      events.push({
+        type: 'reservation.no_show', actorId: 'admin-1', subjectId: r.playerId, entity: 'reservation', entityId: r.id,
+        summary: `${name('admin-1')} marked ${name(r.playerId)} as no-show on ${where}`, meta: {}, createdAt: iso(r.date, r.end),
+      })
+    }
+  }
+  for (const l of s.lessons) {
+    events.push({
+      type: 'lesson.created', actorId: l.coachId, entity: 'lesson', entityId: l.id,
+      summary: `${name(l.coachId)} created "${l.title}" on ${court(l.courtId)} on ${l.date} at ${l.start}–${l.end}`,
+      meta: { capacity: l.capacity, courtId: l.courtId, date: l.date, start: l.start }, createdAt: iso(l.date, '08:00', -5),
+    })
+    l.studentIds.forEach((id, i) =>
+      events.push({
+        type: 'lesson.enrolled', actorId: id, entity: 'lesson', entityId: l.id,
+        summary: `${name(id)} enrolled in "${l.title}"`, meta: { seatsLeft: l.capacity - i - 1 }, createdAt: iso(l.date, '08:00', -4),
+      }),
+    )
+  }
+  for (const n of s.notes) {
+    events.push({
+      type: 'note.added', actorId: n.coachId, subjectId: n.playerId, entity: 'note', entityId: n.id,
+      summary: `${name(n.coachId)} wrote a note about ${name(n.playerId)}`, meta: { rating: n.rating }, createdAt: n.createdAt,
+    })
+  }
+  const cutoff = now.toISOString()
+  events
+    .filter((e) => e.createdAt <= cutoff)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .forEach((e, i) => s.events.push({ id: `evt-${i + 1}`, ...e }))
 }
 
 function fillFull(s: State) {
