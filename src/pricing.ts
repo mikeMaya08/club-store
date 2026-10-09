@@ -1,6 +1,7 @@
 import { hasBug } from './config'
 import type { Settings } from './types'
 
+/** True when a slot starting at `start` falls inside peak hours (the end of the peak is excluded). */
 export const isPeak = (s: Settings, start: string) => start >= s.peakStart && start < s.peakEnd
 
 /** The price a slot SHOULD cost. Use this for display. */

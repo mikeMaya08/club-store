@@ -3,6 +3,7 @@ import { getConfig, subscribeConfig, type ClubConfig } from './config'
 import { getState, subscribe } from './store'
 import type { State } from './types'
 
+/** One subscription that fires when the club data OR the test config (clock, bugs) changes. */
 function subscribeAll(listener: () => void) {
   const offStore = subscribe(listener)
   const offConfig = subscribeConfig(listener)

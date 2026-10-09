@@ -3,6 +3,7 @@ import { getConfig } from './config'
 
 type Async<T> = { [K in keyof T]: T[K] extends (...a: infer A) => infer R ? (...a: A) => Promise<R> : never }
 
+/** Resolves after `ms` milliseconds. */
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
 /**
