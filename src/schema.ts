@@ -29,6 +29,8 @@ export const reservationSchema = z.object({
   courtId: z.string(),
   playerId: z.string(),
   partnerId: z.string().optional(),
+  /** Set on every occurrence of a weekly recurring booking. */
+  seriesId: z.string().optional(),
   date,
   start: time,
   end: time,
@@ -61,6 +63,19 @@ export const lessonSchema = z.object({
   capacity: z.number().int().min(1),
   status: z.enum(['scheduled', 'done', 'cancelled']),
   attendance: z.record(z.string(), z.enum(['present', 'no-show'])),
+  /** Players waiting for a seat, in order. */
+  waitlist: z.array(z.string()).default([]),
+})
+
+export const lessonTemplateSchema = z.object({
+  id: z.string(),
+  coachId: z.string(),
+  name: z.string().min(1),
+  title: z.string().min(1),
+  courtId: z.string().optional(),
+  start: time,
+  end: time,
+  capacity: z.number().int().min(1),
 })
 
 export const noteSchema = z.object({
@@ -111,6 +126,7 @@ export const stateSchema = z.object({
   reservations: z.array(reservationSchema),
   blocks: z.array(blockSchema),
   lessons: z.array(lessonSchema),
+  lessonTemplates: z.array(lessonTemplateSchema).default([]),
   notes: z.array(noteSchema),
   notifications: z.array(notificationSchema),
   settings: settingsSchema,

@@ -3,6 +3,7 @@ import type {
   blockSchema,
   courtSchema,
   lessonSchema,
+  lessonTemplateSchema,
   noteSchema,
   notificationSchema,
   reservationSchema,
@@ -18,6 +19,7 @@ export type Court = z.infer<typeof courtSchema>
 export type Reservation = z.infer<typeof reservationSchema>
 export type Block = z.infer<typeof blockSchema>
 export type Lesson = z.infer<typeof lessonSchema>
+export type LessonTemplate = z.infer<typeof lessonTemplateSchema>
 export type Note = z.infer<typeof noteSchema>
 export type Notification = z.infer<typeof notificationSchema>
 export type Settings = z.infer<typeof settingsSchema>

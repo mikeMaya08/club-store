@@ -8,6 +8,7 @@ export type RuleCode =
   | 'USER_INACTIVE'
   | 'LESSON_FULL'
   | 'ALREADY_ENROLLED'
+  | 'ALREADY_WAITLISTED'
   | 'COURT_IN_USE'
   | 'NOT_FOUND'
   | 'INVALID_STATE'
@@ -24,6 +25,7 @@ export const RULE_MESSAGES: Record<RuleCode, string> = {
   USER_INACTIVE: 'Your account has been deactivated.',
   LESSON_FULL: 'This lesson is full.',
   ALREADY_ENROLLED: 'You are already enrolled in this lesson.',
+  ALREADY_WAITLISTED: 'You are already on the waitlist for this lesson.',
   COURT_IN_USE: 'This court still has upcoming reservations or lessons.',
   NOT_FOUND: 'The requested item could not be found.',
   INVALID_STATE: 'This action is not allowed in the current state.',

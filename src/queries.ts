@@ -19,12 +19,12 @@ export interface Conflicts {
 export function findConflicts(
   s: State,
   q: SlotQuery,
-  ignore: { blockId?: string; lessonId?: string } = {},
+  ignore: { blockId?: string; lessonId?: string; reservationId?: string } = {},
 ): Conflicts {
   const same = (x: { courtId: string; date: string; start: string; end: string }) =>
     x.courtId === q.courtId && x.date === q.date && overlaps(x, q)
   return {
-    reservations: s.reservations.filter((r) => r.status !== 'cancelled' && same(r)),
+    reservations: s.reservations.filter((r) => r.status !== 'cancelled' && r.id !== ignore.reservationId && same(r)),
     blocks: s.blocks.filter((b) => !b.lessonId && b.id !== ignore.blockId && same(b)),
     lessons: s.lessons.filter((l) => l.status !== 'cancelled' && l.id !== ignore.lessonId && same(l)),
   }
@@ -34,8 +34,13 @@ export const hasConflicts = (c: Conflicts) => c.reservations.length + c.blocks.l
 
 export const isFutureReservation = (r: Reservation, now: Date) => at(r.date, r.start) > now
 
+/** Future booked reservations of a player. A weekly series counts as ONE. */
 export const activeReservationCount = (s: State, playerId: string, now: Date) =>
-  s.reservations.filter((r) => r.playerId === playerId && r.status === 'booked' && isFutureReservation(r, now)).length
+  new Set(
+    s.reservations
+      .filter((r) => r.playerId === playerId && r.status === 'booked' && isFutureReservation(r, now))
+      .map((r) => r.seriesId ?? r.id),
+  ).size
 
 export type SlotStatus = 'available' | 'taken' | 'blocked' | 'lesson' | 'no-lights' | 'past' | 'inactive'
 

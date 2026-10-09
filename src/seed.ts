@@ -73,6 +73,7 @@ const emptyState = (): State => ({
   reservations: [],
   blocks: [],
   lessons: [],
+  lessonTemplates: [],
   notes: [],
   notifications: [],
   settings: { ...DEFAULT_SETTINGS },
@@ -97,13 +98,14 @@ function fillDemo(s: State) {
 
   // Lessons first (each one gets its block), so reservations can avoid them.
   const lessonDefs: Array<Omit<Lesson, 'id' | 'date'> & { offset: number }> = [
-    { offset: 1, coachId: 'coach-1', courtId: 'court-1', start: '17:00', end: '18:00', title: 'Beginner Drills', capacity: 4, studentIds: ['player-1', 'player-2'], status: 'scheduled', attendance: {} },
-    { offset: 2, coachId: 'coach-2', courtId: 'court-3', start: '10:00', end: '11:00', title: 'Serve Clinic', capacity: 6, studentIds: ['player-3', 'player-4', 'player-5'], status: 'scheduled', attendance: {} },
-    { offset: 3, coachId: 'coach-1', courtId: 'court-2', start: '17:00', end: '18:00', title: 'Advanced Rallies', capacity: 3, studentIds: ['player-6', 'player-7', 'player-8'], status: 'scheduled', attendance: {} },
-    { offset: -2, coachId: 'coach-1', courtId: 'court-1', start: '17:00', end: '18:00', title: 'Footwork Basics', capacity: 4, studentIds: ['player-1', 'player-2', 'player-9'], status: 'done', attendance: { 'player-1': 'present', 'player-2': 'present', 'player-9': 'no-show' } },
+    { offset: 1, coachId: 'coach-1', courtId: 'court-1', start: '17:00', end: '18:00', title: 'Beginner Drills', capacity: 4, studentIds: ['player-1', 'player-2'], status: 'scheduled', attendance: {}, waitlist: [] },
+    { offset: 2, coachId: 'coach-2', courtId: 'court-3', start: '10:00', end: '11:00', title: 'Serve Clinic', capacity: 6, studentIds: ['player-3', 'player-4', 'player-5'], status: 'scheduled', attendance: {}, waitlist: [] },
+    { offset: 3, coachId: 'coach-1', courtId: 'court-2', start: '17:00', end: '18:00', title: 'Advanced Rallies', capacity: 3, studentIds: ['player-6', 'player-7', 'player-8'], status: 'scheduled', attendance: {}, waitlist: [] },
+    { offset: -2, coachId: 'coach-1', courtId: 'court-1', start: '17:00', end: '18:00', title: 'Footwork Basics', capacity: 4, studentIds: ['player-1', 'player-2', 'player-9'], status: 'done', attendance: { 'player-1': 'present', 'player-2': 'present', 'player-9': 'no-show' }, waitlist: [] },
   ]
   lessonDefs.forEach(({ offset, ...rest }, i) => {
     const lesson: Lesson = { id: `lesson-${i + 1}`, date: day(offset), ...rest }
+    if (lesson.id === 'lesson-3') lesson.waitlist = ['player-10'] // the full lesson already has someone waiting
     s.lessons.push(lesson)
     s.blocks.push({ id: `block-${i + 1}`, courtId: lesson.courtId, date: lesson.date, start: lesson.start, end: lesson.end, reason: 'lesson', lessonId: lesson.id, createdBy: lesson.coachId })
   })
@@ -156,6 +158,11 @@ function fillDemo(s: State) {
   draft
     .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start))
     .forEach((r, i) => s.reservations.push({ id: `res-${i + 1}`, ...r }))
+
+  s.lessonTemplates.push(
+    { id: 'template-1', coachId: 'coach-1', name: 'Beginner evening', title: 'Beginner Drills', start: '17:00', end: '18:00', capacity: 4 },
+    { id: 'template-2', coachId: 'coach-1', name: 'Morning serve work', title: 'Serve Clinic', courtId: 'court-3', start: '09:00', end: '10:30', capacity: 6 },
+  )
 
   const stamp = (offset: number, time: string) => iso(day(offset), time)
   s.notes.push(
