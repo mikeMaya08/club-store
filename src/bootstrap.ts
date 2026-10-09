@@ -22,6 +22,7 @@ declare global {
 
 const HOOK_PARAMS = ['reset', 'seed', 'as', 'now', 'latency', 'flaky', 'bug']
 
+/** Turns bugs on or off. Turning `stale-ui` off also re-reads the data so the screen catches up. */
 export function setBugs(bugs: Bug[]) {
   const wasStale = getConfig().bugs.includes('stale-ui')
   setConfig({ bugs })
@@ -40,7 +41,7 @@ export function initClub(app: AppName) {
   if (params.has('latency')) setConfig({ latency: Number(params.get('latency')) || 0 })
   if (params.has('flaky')) setConfig({ flaky: Number(params.get('flaky')) || 0 })
   if (params.has('bug')) setBugs(parseBugs(params.get('bug') ?? ''))
-  // Reset runs after `now`, because seeds are relative to the club clock.
+  // Reset must run after `now`: seed dates are relative to the club clock.
   if (params.get('reset') === '1') reset((params.get('seed') as SeedName) || 'demo')
   if (params.has('as')) login(app, params.get('as') ?? '')
 
