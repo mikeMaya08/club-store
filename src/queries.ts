@@ -1,6 +1,6 @@
 import { at, fromMin, overlaps, toMin } from './time'
 import { addDays, format, parseISO } from 'date-fns'
-import type { Block, ClubEvent, EventType, Lesson, Reservation, State } from './types'
+import type { Announcement, Block, ClubEvent, EventType, Lesson, Reservation, State } from './types'
 
 export interface SlotQuery {
   courtId: string
@@ -113,4 +113,23 @@ export function filterEvents(events: ClubEvent[], f: EventFilter = {}): ClubEven
         (!f.to || e.createdAt.slice(0, 10) <= f.to),
     )
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id, undefined, { numeric: true }))
+}
+
+/** Whether an announcement is still shown on `today` (YYYY-MM-DD). The expiry day itself still counts. */
+export const isAnnouncementActive = (a: Announcement, today: string) => !a.expiresOn || a.expiresOn >= today
+
+/** The clock can be frozen (`?now=`), so announcements may share a timestamp: the higher id is the newer one. */
+const idNumber = (id: string) => Number(id.slice(id.lastIndexOf('-') + 1))
+
+/**
+ * The announcements a player or coach sees: addressed to their role, not expired and not dismissed by them.
+ * Pinned ones come first, then the newest. Admins manage the full list instead, so they get none here.
+ */
+export function announcementsFor(s: State, userId: string, today: string): Announcement[] {
+  const user = s.users.find((u) => u.id === userId)
+  if (!user || user.role === 'admin') return []
+  const audience = user.role === 'coach' ? 'coaches' : 'players'
+  return s.announcements
+    .filter((a) => (a.audience === 'all' || a.audience === audience) && isAnnouncementActive(a, today) && !a.dismissedBy.includes(userId))
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt) || idNumber(b.id) - idNumber(a.id))
 }

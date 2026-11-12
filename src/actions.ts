@@ -3,12 +3,12 @@ import { hasBug } from './config'
 import { RuleError } from './errors'
 import { chargedPrice } from './pricing'
 import { activeReservationCount, findConflicts, hasConflicts, isFutureReservation } from './queries'
-import { settingsSchema } from './schema'
+import { announcementSchema, settingsSchema } from './schema'
 import { commit } from './store'
 import { at, fromMin, hoursUntil, overlaps, slotsFor, toMin } from './time'
 import { addDays, format, parseISO } from 'date-fns'
 import { lessonTemplateSchema } from './schema'
-import type { Block, Court, EventType, Lesson, LessonTemplate, Note, Reservation, Role, Settings, State, User } from './types'
+import type { Announcement, AnnouncementAudience, Block, Court, EventType, Lesson, LessonTemplate, Note, Reservation, Role, Settings, State, User } from './types'
 
 // ---------- helpers (all operate on the draft state inside commit) ----------
 
@@ -780,6 +780,69 @@ function markAllNotificationsRead(userId: string): void {
   })
 }
 
+// ---------- announcements ----------
+
+export interface AnnouncementInput {
+  title: string
+  body: string
+  audience: AnnouncementAudience
+  pinned?: boolean
+  expiresOn?: string
+}
+
+function getAnnouncement(s: State, id: string): Announcement {
+  const a = s.announcements.find((x) => x.id === id)
+  if (!a) throw new RuleError('NOT_FOUND', 'Announcement not found.')
+  return a
+}
+
+/** Admins only. Notifies every active user in the audience. */
+function createAnnouncement(input: AnnouncementInput, actorId: string): Announcement {
+  return commit((s) => {
+    if (getUser(s, actorId).role !== 'admin') throw new RuleError('INVALID_STATE', 'Only admins can post announcements.')
+    const draft = {
+      id: nextId('announcement', s.announcements),
+      title: input.title.trim(),
+      body: input.body.trim(),
+      audience: input.audience,
+      pinned: input.pinned ?? false,
+      authorId: actorId,
+      createdAt: clock.now().toISOString(),
+      expiresOn: input.expiresOn || undefined,
+      dismissedBy: [],
+    }
+    const parsed = announcementSchema.safeParse(draft)
+    if (!parsed.success) throw new RuleError('VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    if (parsed.data.expiresOn && parsed.data.expiresOn < clock.today()) throw new RuleError('VALIDATION', 'The expiry date cannot be in the past.')
+    s.announcements.push(parsed.data)
+    const wanted = parsed.data.audience === 'all' ? ['player', 'coach'] : [parsed.data.audience === 'coaches' ? 'coach' : 'player']
+    for (const u of s.users) {
+      if (u.active && wanted.includes(u.role)) notify(s, u.id, 'announcement', `New announcement: ${parsed.data.title}`)
+    }
+    logEvent(s, { type: 'announcement.created', actorId, entity: 'announcement', entityId: parsed.data.id, summary: `${userName(s, actorId)} posted the announcement "${parsed.data.title}" for ${parsed.data.audience}`, meta: { audience: parsed.data.audience, pinned: parsed.data.pinned } })
+    return parsed.data
+  })
+}
+
+function deleteAnnouncement(id: string, actorId: string): void {
+  commit((s) => {
+    if (getUser(s, actorId).role !== 'admin') throw new RuleError('INVALID_STATE', 'Only admins can delete announcements.')
+    const a = getAnnouncement(s, id)
+    s.announcements = s.announcements.filter((x) => x.id !== id)
+    logEvent(s, { type: 'announcement.deleted', actorId, entity: 'announcement', entityId: id, summary: `${userName(s, actorId)} deleted the announcement "${a.title}"` })
+  })
+}
+
+/** Hides an announcement for one user only. Pinned announcements cannot be dismissed. */
+function dismissAnnouncement(id: string, userId: string): void {
+  commit((s) => {
+    getUser(s, userId)
+    const a = getAnnouncement(s, id)
+    if (a.pinned) throw new RuleError('INVALID_STATE', 'Pinned announcements cannot be dismissed.')
+    if (!a.dismissedBy.includes(userId)) a.dismissedBy.push(userId)
+  })
+}
+
 // ---------- users ----------
 
 /** Rule 11: deactivating a user cancels their future reservations. */
@@ -883,6 +946,9 @@ export const actions = {
   addNote,
   markNotificationRead,
   markAllNotificationsRead,
+  createAnnouncement,
+  deleteAnnouncement,
+  dismissAnnouncement,
   setUserActive,
   setUserRole,
   createCourt,

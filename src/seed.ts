@@ -75,6 +75,7 @@ const emptyState = (): State => ({
   lessons: [],
   lessonTemplates: [],
   events: [],
+  announcements: [],
   notes: [],
   notifications: [],
   settings: { ...DEFAULT_SETTINGS },
@@ -184,6 +185,13 @@ function fillDemo(s: State) {
   notif('admin-1', 'info', 'Weekly report is ready.', false, 0)
   notif('coach-1', 'info', 'Advanced Rallies is now full.', false, 0)
   notif('coach-2', 'info', 'Serve Clinic has 3 seats left.', true, 0)
+
+  s.announcements.push(
+    { id: 'announcement-1', title: 'Court 4 is closed for resurfacing', body: 'Court 4 is out of service until further notice. Sorry for the inconvenience.', audience: 'all', pinned: true, authorId: 'admin-1', createdAt: stamp(-3, '08:00'), dismissedBy: [] },
+    { id: 'announcement-2', title: 'Summer tournament sign-up', body: 'Sign-ups for the club tournament are open at the front desk.', audience: 'players', pinned: false, authorId: 'admin-1', createdAt: stamp(-1, '12:00'), expiresOn: day(14), dismissedBy: [] },
+    { id: 'announcement-3', title: 'Coaches meeting on Friday', body: 'Please bring your lesson plans for next month.', audience: 'coaches', pinned: false, authorId: 'admin-1', createdAt: stamp(-1, '12:30'), dismissedBy: [] },
+    { id: 'announcement-4', title: 'Easter opening hours', body: 'This notice already expired.', audience: 'all', pinned: false, authorId: 'admin-1', createdAt: stamp(-20, '09:00'), expiresOn: day(-10), dismissedBy: [] },
+  )
 
   seedEvents(s, now)
 }

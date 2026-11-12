@@ -42,6 +42,7 @@ function write(state: State) {
 function normalize(data: State): State {
   data.lessonTemplates ??= []
   data.events ??= []
+  data.announcements ??= []
   for (const lesson of data.lessons) lesson.waitlist ??= []
   return data
 }

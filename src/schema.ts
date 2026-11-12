@@ -154,7 +154,27 @@ export const EVENT_TYPES = [
   'court.updated',
   'court.deleted',
   'settings.updated',
+  'announcement.created',
+  'announcement.deleted',
 ] as const
+
+export const ANNOUNCEMENT_AUDIENCES = ['all', 'players', 'coaches'] as const
+
+/** A message from the club to everyone, only the players or only the coaches. */
+export const announcementSchema = z.object({
+  id: z.string(),
+  title: z.string().min(1).max(80),
+  body: z.string().min(1).max(500),
+  audience: z.enum(ANNOUNCEMENT_AUDIENCES),
+  /** Pinned announcements are listed first and cannot be dismissed. */
+  pinned: z.boolean(),
+  authorId: z.string(),
+  createdAt: z.string(),
+  /** Last day it is shown (inclusive). No value means it never expires. */
+  expiresOn: date.optional(),
+  /** Users who closed it. Only affects what they see. */
+  dismissedBy: z.array(z.string()).default([]),
+})
 
 /** One entry of the activity log: who did what, and to whom. */
 export const eventSchema = z.object({
@@ -164,7 +184,7 @@ export const eventSchema = z.object({
   actorId: z.string(),
   /** The user the action affects, when different from the actor. */
   subjectId: z.string().optional(),
-  entity: z.enum(['reservation', 'block', 'lesson', 'user', 'court', 'settings', 'template', 'note']).optional(),
+  entity: z.enum(['reservation', 'block', 'lesson', 'user', 'court', 'settings', 'template', 'note', 'announcement']).optional(),
   entityId: z.string().optional(),
   summary: z.string(),
   meta: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
@@ -180,6 +200,7 @@ export const stateSchema = z.object({
   lessonTemplates: z.array(lessonTemplateSchema).default([]),
   notes: z.array(noteSchema),
   events: z.array(eventSchema).default([]),
+  announcements: z.array(announcementSchema).default([]),
   notifications: z.array(notificationSchema),
   settings: settingsSchema,
 })

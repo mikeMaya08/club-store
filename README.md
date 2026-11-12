@@ -98,9 +98,19 @@ Every action writes an event to `state.events` **inside the same `commit`**, so 
 - **`previewRecurringBlock(state, { courtId, date, start, end, weeks })`** is a pure helper that lists the dates, the weeks that would conflict and the reservations that would be cancelled, so a UI can warn before confirming.
 - Blocks saved before v0.4 keep working (`seriesId` is optional).
 
+### v0.5.0: announcements
+
+Admins post messages for everyone, only the players or only the coaches. Players and coaches see the ones addressed to them.
+
+- `actions.createAnnouncement({ title, body, audience: 'all' | 'players' | 'coaches', pinned?, expiresOn? }, actorId)`: admins only (`INVALID_STATE` otherwise). Title 1–80 and body 1–500 characters, `expiresOn` (YYYY-MM-DD) cannot be in the past (`VALIDATION`). Notifies every active user of the audience.
+- `actions.deleteAnnouncement(id, actorId)`: admins only, removes it for everyone.
+- `actions.dismissAnnouncement(id, userId)`: hides it for that user only. Pinned announcements cannot be dismissed.
+- `announcementsFor(state, userId, today)`: what a player or coach sees (audience, not expired, not dismissed; pinned first, then newest). Admins get `[]` and read `state.announcements` instead. `isAnnouncementActive(a, today)`: the expiry day itself still counts.
+- Events `announcement.created` and `announcement.deleted` appear in the activity log. The demo seed has 4 announcements (one pinned, one expired).
+
 ### Seeds
 
-- `demo`: 6 courts (2 without lights, 1 inactive), 1 admin, 2 coaches, 12 players, 40 reservations in ±7 days, 4 lessons (`lesson-3` is full and has `player-10` on its waitlist), 2 lesson templates for `coach-1`, notes, notifications. Dates are relative to the club clock, so use `?now=` for fully fixed data.
+- `demo`: 6 courts (2 without lights, 1 inactive), 1 admin, 2 coaches, 12 players, 40 reservations in ±7 days, 4 lessons (`lesson-3` is full and has `player-10` on its waitlist), 2 lesson templates for `coach-1`, 4 announcements, notes, notifications. Dates are relative to the club clock, so use `?now=` for fully fixed data.
 - `empty`: users and courts only.
 - `full`: ~90% of the next 3 days booked by `player-7..12`; `player-1..6` are free to book.
 
