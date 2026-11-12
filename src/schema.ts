@@ -120,6 +120,53 @@ export const settingsSchema = z
     }
   })
 
+export const EVENT_TYPES = [
+  'reservation.booked',
+  'reservation.series_booked',
+  'reservation.cancelled',
+  'reservation.series_cancelled',
+  'reservation.moved',
+  'reservation.no_show',
+  'block.created',
+  'block.moved',
+  'block.deleted',
+  'lesson.created',
+  'lesson.updated',
+  'lesson.cancelled',
+  'lesson.completed',
+  'lesson.enrolled',
+  'lesson.left',
+  'lesson.waitlist_joined',
+  'lesson.waitlist_left',
+  'lesson.waitlist_promoted',
+  'attendance.marked',
+  'note.added',
+  'template.saved',
+  'template.deleted',
+  'user.activated',
+  'user.deactivated',
+  'user.role_changed',
+  'court.created',
+  'court.updated',
+  'court.deleted',
+  'settings.updated',
+] as const
+
+/** One entry of the activity log: who did what, and to whom. */
+export const eventSchema = z.object({
+  id: z.string(),
+  type: z.enum(EVENT_TYPES),
+  /** User id, or 'system' for automatic effects (e.g. waitlist promotion). */
+  actorId: z.string(),
+  /** The user the action affects, when different from the actor. */
+  subjectId: z.string().optional(),
+  entity: z.enum(['reservation', 'block', 'lesson', 'user', 'court', 'settings', 'template', 'note']).optional(),
+  entityId: z.string().optional(),
+  summary: z.string(),
+  meta: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  createdAt: z.string(),
+})
+
 export const stateSchema = z.object({
   users: z.array(userSchema),
   courts: z.array(courtSchema),
@@ -128,6 +175,7 @@ export const stateSchema = z.object({
   lessons: z.array(lessonSchema),
   lessonTemplates: z.array(lessonTemplateSchema).default([]),
   notes: z.array(noteSchema),
+  events: z.array(eventSchema).default([]),
   notifications: z.array(notificationSchema),
   settings: settingsSchema,
 })

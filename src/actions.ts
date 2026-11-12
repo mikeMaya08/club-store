@@ -8,7 +8,7 @@ import { commit } from './store'
 import { at, fromMin, hoursUntil, overlaps, slotsFor, toMin } from './time'
 import { addDays, format, parseISO } from 'date-fns'
 import { lessonTemplateSchema } from './schema'
-import type { Block, Court, Lesson, LessonTemplate, Note, Reservation, Role, Settings, State, User } from './types'
+import type { Block, Court, EventType, Lesson, LessonTemplate, Note, Reservation, Role, Settings, State, User } from './types'
 
 // ---------- helpers (all operate on the draft state inside commit) ----------
 
@@ -31,6 +31,38 @@ function notify(s: State, userId: string, type: string, message: string) {
     createdAt: clock.now().toISOString(),
   })
 }
+
+const MAX_EVENTS = 500
+
+interface EventInput {
+  type: EventType
+  actorId?: string | null
+  subjectId?: string
+  entity?: NonNullable<State['events'][number]['entity']>
+  entityId?: string
+  summary: string
+  meta?: Record<string, string | number | boolean>
+}
+
+/** Appends to the activity log inside the same commit as the action it describes. */
+function logEvent(s: State, e: EventInput) {
+  if (hasBug('missing-events') && /cancelled$/.test(e.type)) return // injectable bug: cancellations are not logged
+  s.events.push({
+    id: nextId('evt', s.events),
+    type: e.type,
+    actorId: e.actorId ?? 'system',
+    subjectId: e.subjectId,
+    entity: e.entity,
+    entityId: e.entityId,
+    summary: e.summary,
+    meta: e.meta ?? {},
+    createdAt: clock.now().toISOString(),
+  })
+  if (s.events.length > MAX_EVENTS) s.events.splice(0, s.events.length - MAX_EVENTS)
+}
+
+const userName = (s: State, id: string) => s.users.find((u) => u.id === id)?.name ?? id
+const slotText = (s: State, r: { courtId: string; date: string; start: string }) => `${courtName(s, r.courtId)} on ${r.date} at ${r.start}`
 
 function getUser(s: State, id: string): User {
   const u = s.users.find((x) => x.id === id)
@@ -63,7 +95,7 @@ function assertTimeRange(start: string, end: string) {
 }
 
 /** Rule 8: cancel booked reservations that overlap a block and tell the players. */
-function cancelOverlapping(s: State, b: { courtId: string; date: string; start: string; end: string }) {
+function cancelOverlapping(s: State, b: { courtId: string; date: string; start: string; end: string }, actorId?: string) {
   for (const r of s.reservations) {
     if (r.status === 'booked' && r.courtId === b.courtId && r.date === b.date && overlaps(r, b)) {
       r.status = 'cancelled'
@@ -74,16 +106,34 @@ function cancelOverlapping(s: State, b: { courtId: string; date: string; start: 
         'reservation-cancelled',
         `Your reservation on ${courtName(s, r.courtId)} (${r.date} ${r.start}) was cancelled: blocked by club.`,
       )
+      logEvent(s, {
+        type: 'reservation.cancelled',
+        actorId,
+        subjectId: r.playerId,
+        entity: 'reservation',
+        entityId: r.id,
+        summary: `Reservation of ${userName(s, r.playerId)} on ${slotText(s, r)} cancelled: blocked by club`,
+        meta: { reason: 'blocked by club' },
+      })
     }
   }
 }
 
-function cancelFutureReservations(s: State, playerId: string, reason: string) {
+function cancelFutureReservations(s: State, playerId: string, reason: string, actorId?: string) {
   const now = clock.now()
   for (const r of s.reservations) {
     if (r.playerId === playerId && r.status === 'booked' && isFutureReservation(r, now)) {
       r.status = 'cancelled'
       r.cancelReason = reason
+      logEvent(s, {
+        type: 'reservation.cancelled',
+        actorId,
+        subjectId: r.playerId,
+        entity: 'reservation',
+        entityId: r.id,
+        summary: `Reservation of ${userName(s, r.playerId)} on ${slotText(s, r)} cancelled: ${reason}`,
+        meta: { reason },
+      })
     }
   }
 }
@@ -102,7 +152,7 @@ export interface BookInput {
 function bookOne(
   s: State,
   input: BookInput,
-  opts: { seriesId?: string; checkLimit?: boolean; notifyPartner?: boolean } = {},
+  opts: { seriesId?: string; checkLimit?: boolean; notifyPartner?: boolean; log?: boolean } = {},
 ): Reservation {
   const now = clock.now()
   getActiveUser(s, input.playerId)
@@ -135,6 +185,17 @@ function bookOne(
     createdAt: now.toISOString(),
   }
   s.reservations.push(reservation)
+  if (opts.log ?? true) {
+    logEvent(s, {
+      type: 'reservation.booked',
+      actorId: input.playerId,
+      subjectId: input.partnerId,
+      entity: 'reservation',
+      entityId: reservation.id,
+      summary: `${userName(s, input.playerId)} booked ${slotText(s, reservation)}${input.partnerId ? ` with ${userName(s, input.partnerId)}` : ''}`,
+      meta: { courtId: reservation.courtId, date: reservation.date, start: reservation.start, price: reservation.price },
+    })
+  }
   if (input.partnerId && (opts.notifyPartner ?? true)) {
     const who = getUser(s, input.playerId).name
     const series = opts.seriesId ? ' (weekly series)' : ''
@@ -168,12 +229,21 @@ function bookRecurring(input: RecurringInput): Reservation[] {
     for (let i = 0; i < input.weeks; i++) {
       const date = format(addDays(parseISO(input.date), 7 * i), 'yyyy-MM-dd')
       try {
-        created.push(bookOne(s, { ...input, date }, { seriesId, checkLimit: i === 0, notifyPartner: i === 0 }))
+        created.push(bookOne(s, { ...input, date }, { seriesId, checkLimit: i === 0, notifyPartner: i === 0, log: false }))
       } catch (e) {
         if (e instanceof RuleError) throw new RuleError(e.code, `Week of ${date}: ${e.message}`)
         throw e
       }
     }
+    logEvent(s, {
+      type: 'reservation.series_booked',
+      actorId: input.playerId,
+      subjectId: input.partnerId,
+      entity: 'reservation',
+      entityId: created[0].id,
+      summary: `${userName(s, input.playerId)} booked ${input.weeks} weekly sessions on ${courtName(s, input.courtId)} at ${input.start} from ${input.date}`,
+      meta: { seriesId, weeks: input.weeks, courtId: input.courtId, start: input.start, price: created.reduce((sum, r) => sum + r.price, 0) },
+    })
     return created
   })
 }
@@ -197,6 +267,15 @@ function cancelSeries(seriesId: string, actorId: string, opts: { force?: boolean
       cancelled++
     }
     if (cancelled === 0) throw new RuleError('CANCEL_TOO_LATE')
+    logEvent(s, {
+      type: 'reservation.series_cancelled',
+      actorId,
+      subjectId: future[0].playerId,
+      entity: 'reservation',
+      entityId: future[0].id,
+      summary: `${actor.name} cancelled ${cancelled} session(s) of a weekly series of ${userName(s, future[0].playerId)}`,
+      meta: { seriesId, cancelled, skipped: future.length - cancelled },
+    })
     return { cancelled, skipped: future.length - cancelled }
   })
 }
@@ -220,7 +299,17 @@ function moveReservation(id: string, to: { courtId?: string; date?: string; star
     const query = { courtId: next.courtId, date: next.date, start: slot.start, end: slot.end }
     if (!hasBug('double-booking') && hasConflicts(findConflicts(s, query, { reservationId: id }))) throw new RuleError('SLOT_TAKEN')
 
+    const before = slotText(s, r)
     Object.assign(r, query, { price: chargedPrice(s.settings, slot.start) })
+    logEvent(s, {
+      type: 'reservation.moved',
+      actorId,
+      subjectId: r.playerId,
+      entity: 'reservation',
+      entityId: r.id,
+      summary: `${actor.name} moved the reservation of ${userName(s, r.playerId)} from ${before} to ${slotText(s, r)}`,
+      meta: { price: r.price },
+    })
     notify(s, r.playerId, 'reservation-moved', `Your reservation was moved to ${courtName(s, r.courtId)} on ${r.date} at ${r.start}.`)
     return r
   })
@@ -244,17 +333,34 @@ function cancelReservation(id: string, actorId: string, opts: { force?: boolean;
     if (actor.role === 'admin') {
       notify(s, r.playerId, 'reservation-cancelled', `Your reservation on ${courtName(s, r.courtId)} (${r.date} ${r.start}) was cancelled by the club.`)
     }
+    logEvent(s, {
+      type: 'reservation.cancelled',
+      actorId,
+      subjectId: r.playerId,
+      entity: 'reservation',
+      entityId: r.id,
+      summary: `${actor.name} cancelled the reservation of ${userName(s, r.playerId)} on ${slotText(s, r)}`,
+      meta: { reason: r.cancelReason ?? '' },
+    })
     return r
   })
 }
 
 function markNoShow(id: string, actorId: string): Reservation {
   return commit((s) => {
-    getActiveUser(s, actorId)
+    const actor = getActiveUser(s, actorId)
     const r = s.reservations.find((x) => x.id === id)
     if (!r) throw new RuleError('NOT_FOUND', 'Reservation not found.')
     if (r.status !== 'booked') throw new RuleError('INVALID_STATE', 'Only booked reservations can be marked as no-show.')
     r.status = 'no-show'
+    logEvent(s, {
+      type: 'reservation.no_show',
+      actorId,
+      subjectId: r.playerId,
+      entity: 'reservation',
+      entityId: r.id,
+      summary: `${actor.name} marked ${userName(s, r.playerId)} as no-show on ${slotText(s, r)}`,
+    })
     return r
   })
 }
@@ -284,12 +390,20 @@ function createBlock(input: BlockInput): Block {
     assertBlockFree(s, input)
     const block: Block = { id: nextId('block', s.blocks), ...input }
     s.blocks.push(block)
-    cancelOverlapping(s, block) // rule 8
+    logEvent(s, {
+      type: 'block.created',
+      actorId: input.createdBy,
+      entity: 'block',
+      entityId: block.id,
+      summary: `${userName(s, input.createdBy)} blocked ${slotText(s, block)}–${block.end} for ${block.reason}`,
+      meta: { reason: block.reason, courtId: block.courtId, date: block.date, start: block.start, end: block.end },
+    })
+    cancelOverlapping(s, block, input.createdBy) // rule 8
     return block
   })
 }
 
-function moveBlock(id: string, to: { courtId?: string; date?: string; start?: string; end?: string }): Block {
+function moveBlock(id: string, to: { courtId?: string; date?: string; start?: string; end?: string }, actorId?: string): Block {
   return commit((s) => {
     const block = s.blocks.find((b) => b.id === id)
     if (!block) throw new RuleError('NOT_FOUND', 'Block not found.')
@@ -299,17 +413,26 @@ function moveBlock(id: string, to: { courtId?: string; date?: string; start?: st
     assertTimeRange(next.start, next.end)
     assertBlockFree(s, next, id)
     Object.assign(block, next)
-    cancelOverlapping(s, block)
+    logEvent(s, {
+      type: 'block.moved',
+      actorId,
+      entity: 'block',
+      entityId: block.id,
+      summary: `Block ${block.id} is now ${slotText(s, block)}–${block.end}`,
+      meta: { courtId: block.courtId, date: block.date, start: block.start, end: block.end },
+    })
+    cancelOverlapping(s, block, actorId)
     return block
   })
 }
 
-function deleteBlock(id: string): void {
+function deleteBlock(id: string, actorId?: string): void {
   commit((s) => {
     const block = s.blocks.find((b) => b.id === id)
     if (!block) throw new RuleError('NOT_FOUND', 'Block not found.')
     if (block.lessonId) throw new RuleError('INVALID_STATE', 'Cancel the lesson to remove its block.')
     s.blocks = s.blocks.filter((b) => b.id !== id)
+    logEvent(s, { type: 'block.deleted', actorId, entity: 'block', entityId: id, summary: `Block on ${slotText(s, block)}–${block.end} deleted`, meta: { reason: block.reason } })
   })
 }
 
@@ -321,6 +444,7 @@ function promoteFromWaitlist(s: State, lesson: Lesson) {
     const id = lesson.waitlist.shift()!
     if (!s.users.find((u) => u.id === id)?.active) continue
     lesson.studentIds.push(id)
+    logEvent(s, { type: 'lesson.waitlist_promoted', subjectId: id, entity: 'lesson', entityId: lesson.id, summary: `${userName(s, id)} moved from the waitlist into ${lesson.title}` })
     notify(s, id, 'waitlist-promoted', `A seat opened up: you are now enrolled in ${lesson.title}.`)
   }
 }
@@ -361,13 +485,21 @@ function createLesson(input: LessonInput): Lesson {
       lessonId: lesson.id,
       createdBy: lesson.coachId,
     })
+    logEvent(s, {
+      type: 'lesson.created',
+      actorId: input.coachId,
+      entity: 'lesson',
+      entityId: lesson.id,
+      summary: `${coach.name} created "${lesson.title}" on ${slotText(s, lesson)}–${lesson.end}`,
+      meta: { capacity: lesson.capacity, courtId: lesson.courtId, date: lesson.date, start: lesson.start },
+    })
     return lesson
   })
 }
 
 function cancelLesson(id: string, actorId: string): Lesson {
   return commit((s) => {
-    getActiveUser(s, actorId)
+    const actor = getActiveUser(s, actorId)
     const lesson = s.lessons.find((l) => l.id === id)
     if (!lesson) throw new RuleError('NOT_FOUND', 'Lesson not found.')
     if (lesson.status !== 'scheduled') throw new RuleError('INVALID_STATE', 'Only scheduled lessons can be cancelled.')
@@ -376,17 +508,26 @@ function cancelLesson(id: string, actorId: string): Lesson {
     for (const studentId of [...lesson.studentIds, ...lesson.waitlist]) {
       notify(s, studentId, 'lesson-cancelled', `The lesson "${lesson.title}" on ${lesson.date} was cancelled.`)
     }
+    logEvent(s, {
+      type: 'lesson.cancelled',
+      actorId,
+      entity: 'lesson',
+      entityId: id,
+      summary: `${actor.name} cancelled "${lesson.title}" on ${lesson.date}`,
+      meta: { students: lesson.studentIds.length, waitlist: lesson.waitlist.length },
+    })
     lesson.waitlist = []
     return lesson
   })
 }
 
-function completeLesson(id: string): Lesson {
+function completeLesson(id: string, actorId?: string): Lesson {
   return commit((s) => {
     const lesson = s.lessons.find((l) => l.id === id)
     if (!lesson) throw new RuleError('NOT_FOUND', 'Lesson not found.')
     if (lesson.status !== 'scheduled') throw new RuleError('INVALID_STATE', 'Only scheduled lessons can be completed.')
     lesson.status = 'done'
+    logEvent(s, { type: 'lesson.completed', actorId: actorId ?? lesson.coachId, entity: 'lesson', entityId: id, summary: `"${lesson.title}" on ${lesson.date} marked as done` })
     return lesson
   })
 }
@@ -400,6 +541,7 @@ function enrollInLesson(lessonId: string, playerId: string): Lesson {
     if (lesson.studentIds.includes(playerId)) throw new RuleError('ALREADY_ENROLLED') // rule 10
     if (lesson.studentIds.length >= lesson.capacity) throw new RuleError('LESSON_FULL') // rule 10
     lesson.studentIds.push(playerId)
+    logEvent(s, { type: 'lesson.enrolled', actorId: playerId, entity: 'lesson', entityId: lessonId, summary: `${userName(s, playerId)} enrolled in "${lesson.title}"`, meta: { seatsLeft: lesson.capacity - lesson.studentIds.length } })
     notify(s, playerId, 'lesson-enrolled', `You are enrolled in ${lesson.title}.`)
     return lesson
   })
@@ -413,6 +555,7 @@ function leaveLesson(lessonId: string, playerId: string): Lesson {
     if (!lesson.studentIds.includes(playerId)) throw new RuleError('INVALID_STATE', 'You are not enrolled in this lesson.')
     lesson.studentIds = lesson.studentIds.filter((id) => id !== playerId)
     delete lesson.attendance[playerId]
+    logEvent(s, { type: 'lesson.left', actorId: playerId, entity: 'lesson', entityId: lessonId, summary: `${userName(s, playerId)} left "${lesson.title}"` })
     promoteFromWaitlist(s, lesson)
     return lesson
   })
@@ -428,6 +571,7 @@ function joinWaitlist(lessonId: string, playerId: string): Lesson {
     if (lesson.waitlist.includes(playerId)) throw new RuleError('ALREADY_WAITLISTED')
     if (lesson.studentIds.length < lesson.capacity) throw new RuleError('INVALID_STATE', 'This lesson still has seats. Enroll instead.')
     lesson.waitlist.push(playerId)
+    logEvent(s, { type: 'lesson.waitlist_joined', actorId: playerId, entity: 'lesson', entityId: lessonId, summary: `${userName(s, playerId)} joined the waitlist of "${lesson.title}"`, meta: { position: lesson.waitlist.length } })
     return lesson
   })
 }
@@ -438,6 +582,7 @@ function leaveWaitlist(lessonId: string, playerId: string): Lesson {
     if (!lesson) throw new RuleError('NOT_FOUND', 'Lesson not found.')
     if (!lesson.waitlist.includes(playerId)) throw new RuleError('INVALID_STATE', 'You are not on the waitlist.')
     lesson.waitlist = lesson.waitlist.filter((id) => id !== playerId)
+    logEvent(s, { type: 'lesson.waitlist_left', actorId: playerId, entity: 'lesson', entityId: lessonId, summary: `${userName(s, playerId)} left the waitlist of "${lesson.title}"` })
     return lesson
   })
 }
@@ -470,7 +615,11 @@ function updateLesson(id: string, patch: LessonPatch, actorId: string): Lesson {
       const block = s.blocks.find((b) => b.lessonId === id)
       if (block) Object.assign(block, { courtId: next.courtId, date: next.date, start: next.start, end: next.end })
     }
+    const changed = (Object.keys(patch) as (keyof LessonPatch)[]).filter((k) => patch[k] !== undefined && patch[k] !== lesson[k])
     Object.assign(lesson, { title: patch.title ?? lesson.title, capacity: next.capacity, courtId: next.courtId, date: next.date, start: next.start, end: next.end })
+    if (changed.length > 0) {
+      logEvent(s, { type: 'lesson.updated', actorId, entity: 'lesson', entityId: id, summary: `${actor.name} edited "${lesson.title}" (${changed.join(', ')})`, meta: { changed: changed.join(',') } })
+    }
     promoteFromWaitlist(s, lesson)
     if (moved) {
       for (const studentId of lesson.studentIds) {
@@ -491,6 +640,7 @@ function saveTemplate(input: Omit<LessonTemplate, 'id'>): LessonTemplate {
     if (!parsed.success) throw new RuleError('VALIDATION', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
     const template: LessonTemplate = { id: nextId('template', s.lessonTemplates), ...parsed.data }
     s.lessonTemplates.push(template)
+    logEvent(s, { type: 'template.saved', actorId: input.coachId, entity: 'template', entityId: template.id, summary: `${userName(s, input.coachId)} saved the template "${template.name}"` })
     return template
   })
 }
@@ -501,20 +651,24 @@ function deleteTemplate(id: string, actorId: string): void {
     if (!template) throw new RuleError('NOT_FOUND', 'Template not found.')
     if (template.coachId !== actorId) throw new RuleError('INVALID_STATE', 'You can only delete your own templates.')
     s.lessonTemplates = s.lessonTemplates.filter((x) => x.id !== id)
+    logEvent(s, { type: 'template.deleted', actorId, entity: 'template', entityId: id, summary: `${userName(s, actorId)} deleted the template "${template.name}"` })
   })
 }
 
 /** A no-show also marks the student's overlapping booked reservation as no-show. */
-function setAttendance(lessonId: string, studentId: string, value: 'present' | 'no-show'): Lesson {
+function setAttendance(lessonId: string, studentId: string, value: 'present' | 'no-show', actorId?: string): Lesson {
   return commit((s) => {
     const lesson = s.lessons.find((l) => l.id === lessonId)
     if (!lesson) throw new RuleError('NOT_FOUND', 'Lesson not found.')
     if (!lesson.studentIds.includes(studentId)) throw new RuleError('INVALID_STATE', 'That player is not enrolled.')
     lesson.attendance[studentId] = value
+    const by = actorId ?? lesson.coachId
+    logEvent(s, { type: 'attendance.marked', actorId: by, subjectId: studentId, entity: 'lesson', entityId: lessonId, summary: `${userName(s, studentId)} marked ${value} in "${lesson.title}"`, meta: { value } })
     if (value === 'no-show') {
       for (const r of s.reservations) {
         if (r.playerId === studentId && r.status === 'booked' && r.date === lesson.date && overlaps(r, lesson)) {
           r.status = 'no-show'
+          logEvent(s, { type: 'reservation.no_show', actorId: by, subjectId: studentId, entity: 'reservation', entityId: r.id, summary: `${userName(s, studentId)} marked as no-show on ${slotText(s, r)} (from lesson attendance)` })
         }
       }
     }
@@ -530,6 +684,7 @@ function addNote(input: Omit<Note, 'id' | 'createdAt'>): Note {
     getUser(s, input.playerId)
     const note: Note = { id: nextId('note', s.notes), ...input, createdAt: clock.now().toISOString() }
     s.notes.push(note)
+    logEvent(s, { type: 'note.added', actorId: input.coachId, subjectId: input.playerId, entity: 'note', entityId: note.id, summary: `${userName(s, input.coachId)} wrote a note about ${userName(s, input.playerId)}`, meta: { rating: note.rating } })
     return note
   })
 }
@@ -554,44 +709,52 @@ function markAllNotificationsRead(userId: string): void {
 // ---------- users ----------
 
 /** Rule 11: deactivating a user cancels their future reservations. */
-function setUserActive(id: string, active: boolean): User {
+function setUserActive(id: string, active: boolean, actorId?: string): User {
   return commit((s) => {
     const user = getUser(s, id)
     user.active = active
-    if (!active) cancelFutureReservations(s, id, 'user deactivated')
+    logEvent(s, { type: active ? 'user.activated' : 'user.deactivated', actorId, subjectId: id, entity: 'user', entityId: id, summary: `${user.name} was ${active ? 'reactivated' : 'deactivated'}` })
+    if (!active) cancelFutureReservations(s, id, 'user deactivated', actorId)
     return user
   })
 }
 
-function setUserRole(id: string, role: Role): User {
+function setUserRole(id: string, role: Role, actorId?: string): User {
   return commit((s) => {
     const user = getUser(s, id)
+    const from = user.role
     user.role = role
+    logEvent(s, { type: 'user.role_changed', actorId, subjectId: id, entity: 'user', entityId: id, summary: `${user.name} changed from ${from} to ${role}`, meta: { from, to: role } })
     return user
   })
 }
 
 // ---------- courts ----------
 
-function createCourt(input: Pick<Court, 'name' | 'surface' | 'lights'>): Court {
+function createCourt(input: Pick<Court, 'name' | 'surface' | 'lights'>, actorId?: string): Court {
   return commit((s) => {
     const court: Court = { id: nextId('court', s.courts), active: true, ...input }
     s.courts.push(court)
+    logEvent(s, { type: 'court.created', actorId, entity: 'court', entityId: court.id, summary: `Court "${court.name}" created (${court.surface}${court.lights ? ', lights' : ''})` })
     return court
   })
 }
 
-function updateCourt(id: string, patch: Partial<Omit<Court, 'id'>>): Court {
+function updateCourt(id: string, patch: Partial<Omit<Court, 'id'>>, actorId?: string): Court {
   return commit((s) => {
     const court = getCourt(s, id)
+    const changed = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== undefined && patch[k] !== court[k])
     Object.assign(court, patch)
+    if (changed.length > 0) {
+      logEvent(s, { type: 'court.updated', actorId, entity: 'court', entityId: id, summary: `Court "${court.name}" updated: ${changed.map((k) => `${k} = ${String(court[k])}`).join(', ')}`, meta: { changed: changed.join(',') } })
+    }
     return court
   })
 }
 
-function deleteCourt(id: string): void {
+function deleteCourt(id: string, actorId?: string): void {
   commit((s) => {
-    getCourt(s, id)
+    const court = getCourt(s, id)
     const now = clock.now()
     const busy =
       s.reservations.some((r) => r.courtId === id && r.status === 'booked' && isFutureReservation(r, now)) ||
@@ -599,18 +762,23 @@ function deleteCourt(id: string): void {
     if (busy) throw new RuleError('COURT_IN_USE')
     s.courts = s.courts.filter((c) => c.id !== id)
     s.blocks = s.blocks.filter((b) => b.courtId !== id)
+    logEvent(s, { type: 'court.deleted', actorId, entity: 'court', entityId: id, summary: `Court "${court.name}" deleted` })
   })
 }
 
 // ---------- settings ----------
 
-function updateSettings(patch: Partial<Settings>): Settings {
+function updateSettings(patch: Partial<Settings>, actorId?: string): Settings {
   return commit((s) => {
     const result = settingsSchema.safeParse({ ...s.settings, ...patch })
     if (!result.success) {
       throw new RuleError('VALIDATION', result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
     }
+    const changed = (Object.keys(result.data) as (keyof Settings)[]).filter((k) => result.data[k] !== s.settings[k])
     s.settings = result.data
+    if (changed.length > 0) {
+      logEvent(s, { type: 'settings.updated', actorId, entity: 'settings', summary: `Settings changed: ${changed.map((k) => `${k} = ${String(result.data[k])}`).join(', ')}`, meta: { changed: changed.join(',') } })
+    }
     return s.settings
   })
 }

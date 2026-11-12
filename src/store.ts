@@ -41,6 +41,7 @@ function write(state: State) {
 /** Fills fields added after v0.1 so data saved by older versions keeps working. */
 function normalize(data: State): State {
   data.lessonTemplates ??= []
+  data.events ??= []
   for (const lesson of data.lessons) lesson.waitlist ??= []
   return data
 }

@@ -1,5 +1,5 @@
 import { at, fromMin, overlaps, toMin } from './time'
-import type { Block, Lesson, Reservation, State } from './types'
+import type { Block, ClubEvent, EventType, Lesson, Reservation, State } from './types'
 
 export interface SlotQuery {
   courtId: string
@@ -60,3 +60,30 @@ export function slotStatus(s: State, courtId: string, date: string, start: strin
 
 export const unreadCount = (s: State, userId: string) =>
   s.notifications.filter((n) => n.userId === userId && !n.read).length
+
+export interface EventFilter {
+  types?: EventType[]
+  /** Only events done by this user. */
+  actorId?: string
+  /** Events done by OR affecting this user. */
+  involvingUserId?: string
+  entity?: ClubEvent['entity']
+  /** 'YYYY-MM-DD', inclusive, compared with the day of `createdAt`. */
+  from?: string
+  to?: string
+}
+
+/** Filters the activity log. The result is newest first. */
+export function filterEvents(events: ClubEvent[], f: EventFilter = {}): ClubEvent[] {
+  return events
+    .filter(
+      (e) =>
+        (!f.types?.length || f.types.includes(e.type)) &&
+        (!f.actorId || e.actorId === f.actorId) &&
+        (!f.involvingUserId || e.actorId === f.involvingUserId || e.subjectId === f.involvingUserId) &&
+        (!f.entity || e.entity === f.entity) &&
+        (!f.from || e.createdAt.slice(0, 10) >= f.from) &&
+        (!f.to || e.createdAt.slice(0, 10) <= f.to),
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id, undefined, { numeric: true }))
+}
