@@ -1,4 +1,5 @@
 import { at, fromMin, overlaps, toMin } from './time'
+import { addDays, format, parseISO } from 'date-fns'
 import type { Block, ClubEvent, EventType, Lesson, Reservation, State } from './types'
 
 export interface SlotQuery {
@@ -41,6 +42,32 @@ export const activeReservationCount = (s: State, playerId: string, now: Date) =>
       .filter((r) => r.playerId === playerId && r.status === 'booked' && isFutureReservation(r, now))
       .map((r) => r.seriesId ?? r.id),
   ).size
+
+export interface RecurringBlockPreview {
+  /** Every date of the series, 'YYYY-MM-DD'. */
+  dates: string[]
+  /** Weeks that cannot be blocked because another block or a lesson is already there. */
+  conflicts: { date: string; what: string }[]
+  /** Booked reservations that creating the series would cancel. */
+  reservations: Reservation[]
+}
+
+/** What `createRecurringBlock` would do, without doing it. Lets a UI warn before confirming. */
+export function previewRecurringBlock(
+  s: State,
+  q: { courtId: string; date: string; start: string; end: string; weeks: number },
+): RecurringBlockPreview {
+  const preview: RecurringBlockPreview = { dates: [], conflicts: [], reservations: [] }
+  for (let i = 0; i < q.weeks; i++) {
+    const date = format(addDays(parseISO(q.date), 7 * i), 'yyyy-MM-dd')
+    preview.dates.push(date)
+    const c = findConflicts(s, { courtId: q.courtId, date, start: q.start, end: q.end })
+    c.blocks.forEach((b) => preview.conflicts.push({ date, what: `a ${b.reason} block (${b.start}-${b.end})` }))
+    c.lessons.forEach((l) => preview.conflicts.push({ date, what: `the lesson "${l.title}" (${l.start}-${l.end})` }))
+    preview.reservations.push(...c.reservations.filter((r) => r.status === 'booked'))
+  }
+  return preview
+}
 
 export type SlotStatus = 'available' | 'taken' | 'blocked' | 'lesson' | 'no-lights' | 'past' | 'inactive'
 

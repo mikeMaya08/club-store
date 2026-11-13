@@ -48,6 +48,8 @@ export const blockSchema = z.object({
   end: time,
   reason: z.enum(['maintenance', 'tournament', 'lesson']),
   lessonId: z.string().optional(),
+  /** Set on every occurrence of a weekly recurring block (e.g. weekly maintenance). */
+  seriesId: z.string().optional(),
   createdBy: z.string(),
 })
 
@@ -130,6 +132,8 @@ export const EVENT_TYPES = [
   'block.created',
   'block.moved',
   'block.deleted',
+  'block.series_created',
+  'block.series_deleted',
   'lesson.created',
   'lesson.updated',
   'lesson.cancelled',

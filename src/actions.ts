@@ -95,7 +95,8 @@ function assertTimeRange(start: string, end: string) {
 }
 
 /** Rule 8: cancel booked reservations that overlap a block and tell the players. */
-function cancelOverlapping(s: State, b: { courtId: string; date: string; start: string; end: string }, actorId?: string) {
+function cancelOverlapping(s: State, b: { courtId: string; date: string; start: string; end: string }, actorId?: string): number {
+  let cancelled = 0
   for (const r of s.reservations) {
     if (r.status === 'booked' && r.courtId === b.courtId && r.date === b.date && overlaps(r, b)) {
       r.status = 'cancelled'
@@ -115,8 +116,10 @@ function cancelOverlapping(s: State, b: { courtId: string; date: string; start: 
         summary: `Reservation of ${userName(s, r.playerId)} on ${slotText(s, r)} cancelled: blocked by club`,
         meta: { reason: 'blocked by club' },
       })
+      cancelled++
     }
   }
+  return cancelled
 }
 
 function cancelFutureReservations(s: State, playerId: string, reason: string, actorId?: string) {
@@ -400,6 +403,77 @@ function createBlock(input: BlockInput): Block {
     })
     cancelOverlapping(s, block, input.createdBy) // rule 8
     return block
+  })
+}
+
+export interface RecurringBlockInput extends BlockInput {
+  /** Number of weekly occurrences, including the first one (2 to 12). */
+  weeks: number
+}
+
+/**
+ * Blocks the same court and time every week (e.g. weekly maintenance). All-or-nothing: if any week
+ * overlaps another block or a lesson, nothing is created and the error names that week. Like a single
+ * block (rule 8) it cancels the booked reservations it covers and notifies the players.
+ */
+function createRecurringBlock(input: RecurringBlockInput): { blocks: Block[]; cancelled: number } {
+  return commit((s) => {
+    getActiveUser(s, input.createdBy)
+    getCourt(s, input.courtId)
+    assertTimeRange(input.start, input.end)
+    if (input.reason === 'lesson') throw new RuleError('INVALID_STATE', 'Lesson blocks are created with the lesson.')
+    if (!Number.isInteger(input.weeks) || input.weeks < 2 || input.weeks > 12) {
+      throw new RuleError('VALIDATION', 'A weekly block needs between 2 and 12 weeks.')
+    }
+    let max = 0
+    for (const b of s.blocks) max = Math.max(max, Number(b.seriesId?.slice('blockseries-'.length)) || 0)
+    const seriesId = `blockseries-${max + 1}`
+    const { weeks, ...base } = input
+
+    logEvent(s, {
+      type: 'block.series_created',
+      actorId: input.createdBy,
+      entity: 'block',
+      summary: `${userName(s, input.createdBy)} blocked ${courtName(s, input.courtId)} every week at ${input.start}–${input.end} for ${input.reason} (${weeks} weeks from ${input.date})`,
+      meta: { seriesId, weeks, reason: input.reason, courtId: input.courtId, start: input.start, end: input.end },
+    })
+
+    const blocks: Block[] = []
+    let cancelled = 0
+    for (let i = 0; i < weeks; i++) {
+      const date = format(addDays(parseISO(input.date), 7 * i), 'yyyy-MM-dd')
+      try {
+        assertBlockFree(s, { ...base, date })
+      } catch (e) {
+        if (e instanceof RuleError) throw new RuleError(e.code, `Week of ${date}: ${e.message}`)
+        throw e
+      }
+      const block: Block = { id: nextId('block', s.blocks), ...base, date, seriesId }
+      s.blocks.push(block)
+      blocks.push(block)
+      cancelled += cancelOverlapping(s, block, input.createdBy) // rule 8, for every week
+    }
+    return { blocks, cancelled }
+  })
+}
+
+/** Removes the upcoming occurrences of a weekly block (past ones are kept as history). Returns how many were removed. */
+function deleteBlockSeries(seriesId: string, actorId: string): number {
+  return commit((s) => {
+    getActiveUser(s, actorId)
+    const now = clock.now()
+    const upcoming = s.blocks.filter((b) => b.seriesId === seriesId && at(b.date, b.start) > now)
+    if (upcoming.length === 0) throw new RuleError('NOT_FOUND', 'That series has no upcoming blocks.')
+    const ids = new Set(upcoming.map((b) => b.id))
+    s.blocks = s.blocks.filter((b) => !ids.has(b.id))
+    logEvent(s, {
+      type: 'block.series_deleted',
+      actorId,
+      entity: 'block',
+      summary: `${userName(s, actorId)} removed ${upcoming.length} upcoming block(s) of a weekly series on ${courtName(s, upcoming[0].courtId)}`,
+      meta: { seriesId, removed: upcoming.length },
+    })
+    return upcoming.length
   })
 }
 
@@ -791,6 +865,8 @@ export const actions = {
   moveReservation,
   markNoShow,
   createBlock,
+  createRecurringBlock,
+  deleteBlockSeries,
   moveBlock,
   deleteBlock,
   createLesson,

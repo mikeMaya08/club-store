@@ -13,7 +13,7 @@ Used by `club-player`, `club-admin` and `club-coach`. It is the only link betwee
 | `npm install`       | Installs and builds `dist/` (via `prepare`)          |
 | `npm run build`     | `tsup` → `dist/index.js` (ESM) + `dist/index.d.ts`   |
 | `npm run dev`       | `tsup --watch` (apps pick up changes automatically)  |
-| `npm test`          | Vitest: every rule and every `RuleError` code (128 tests)        |
+| `npm test`          | Vitest: every rule and every `RuleError` code (148 tests)        |
 | `npm run typecheck` | `tsc --noEmit`                                       |
 
 ## Using it from an app
@@ -27,7 +27,7 @@ Local development (repos cloned side by side):
 Deployment (Vercel installs from git over https; `prepare` builds it. Use `git+https`, because the `github:` shorthand makes npm try SSH, which CI machines don't have):
 
 ```json
-"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.3.0"
+"club-store": "git+https://github.com/mikeMaya08/club-store.git#v0.4.0"
 ```
 
 Apps must add `resolve.dedupe: ['react', 'react-dom']` in `vite.config.ts` so the linked package
@@ -90,6 +90,13 @@ Every action writes an event to `state.events` **inside the same `commit`**, so 
 - `filterEvents(events, { types, actorId, involvingUserId, entity, from, to })` returns newest first. `window.__club.state.events` is available to tests.
 - **Bug `?bug=missing-events`:** cancellation events (`*cancelled`) are not logged.
 - The demo seed ships with a history that matches its reservations, lessons and notes. Data saved before v0.3 is upgraded on read.
+
+### Added in v0.4.0: weekly recurring blocks
+
+- **`createRecurringBlock({ courtId, date, start, end, reason, createdBy, weeks })`** (2 to 12 weeks) blocks the same court and time every week, e.g. weekly maintenance. It is **all-or-nothing**: if any week overlaps another block or a lesson, nothing is created and the error (`SLOT_TAKEN`) names that week. Like a single block (rule 8) it cancels the booked reservations it covers, in every week, and notifies each player. It returns `{ blocks, cancelled }`. Every block of the series carries the same `seriesId` (`blockseries-N`); the series shows up in the activity log as `block.series_created`, followed by one `reservation.cancelled` per affected reservation.
+- **`deleteBlockSeries(seriesId, actorId)`** removes the **upcoming** occurrences (past ones stay as history) and logs `block.series_deleted`. It does not bring cancelled reservations back. A single occurrence can still be moved or deleted on its own.
+- **`previewRecurringBlock(state, { courtId, date, start, end, weeks })`** is a pure helper that lists the dates, the weeks that would conflict and the reservations that would be cancelled, so a UI can warn before confirming.
+- Blocks saved before v0.4 keep working (`seriesId` is optional).
 
 ### Seeds
 
